@@ -27,7 +27,7 @@ docker run -d \
 --name=ollama-translate \
 --network=host \
 --restart always  \
--v /mnt/backup/ollama-translate:/app/translate_output \
+-v /docker/ollama-translate:/app/translate_output \
 ollama-translate
 ```
 
