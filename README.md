@@ -2,7 +2,7 @@
 
 If you already have ollama running on docker, you can use this container to translate .srt subtitles with ollama api. The web interface is provided by gradio.
 
-By default this container will use zongwei/gemma3-translator:4b model, translate from english to brazilian portuguese and will listen on port 5001. If you wish to change these parameters, you can edit app.py before building the image.
+This tool will look for docker running on the localhost.
 
 ## Install Instructions
 

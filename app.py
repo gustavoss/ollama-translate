@@ -1,16 +1,22 @@
 import gradio as gr
 import srt
-import tempfile
 import time
 import os
+import requests
 from ollama import Client, ChatResponse
 
-# Conexão com o Ollama
-client = Client(host="http://localhost:11434")
+# Configuração do Ollama
+OLLAMA_HOST = "http://localhost:11434"
+client = Client(host=OLLAMA_HOST)
 
 MAX_CHARS = 1000
-SRC_LANG = "English"
-TGT_LANG = "Portuguese (Brazilian)"
+LANG_CHOICES = ["English", "Portuguese (Brazilian)", "Spanish", "French",
+                "German", "Italian", "Chinese (Simplified)"]
+
+def get_models():
+    resp = requests.get(f"{OLLAMA_HOST}/api/tags")
+    resp.raise_for_status()
+    return [m.get("model") for m in resp.json().get("models", [])]
 
 def split_chunks(text, max_chars=MAX_CHARS):
     chunks, start = [], 0
@@ -24,83 +30,116 @@ def split_chunks(text, max_chars=MAX_CHARS):
         start = end
     return chunks
 
-def traduzir_chunk(chunk):
-    prompt = f"Translate from {SRC_LANG} to {TGT_LANG}: {chunk}"
+def translate_chunk(chunk, src_lang, tgt_lang, model):
+    prompt = f"Translate from {src_lang} to {tgt_lang}: {chunk}"
     resp: ChatResponse = client.chat(
-        model="zongwei/gemma3-translator:4b",
+        model=model,
         messages=[{"role": "user", "content": prompt}],
         stream=False
     )
     return resp.message.content.strip()
 
 def format_time(seconds):
-    """Converte segundos em formato legível (s, m, h)."""
     if seconds < 60:
         return f"{seconds:.1f}s"
     elif seconds < 3600:
-        minutes = seconds / 60
-        return f"{minutes:.1f}m"
+        return f"{seconds/60:.1f}m"
     else:
-        hours = seconds / 3600
-        return f"{hours:.1f}h"
+        return f"{seconds/3600:.1f}h"
 
-def traduzir_srt(file_bytes: bytes, progress=gr.Progress()):
-    text = file_bytes.decode("utf-8")
-    subs = list(srt.parse(text))
-    total = len(subs)
-    total_time = 0  # Tempo total gasto
-    for i, sub in enumerate(subs):
-        start_time = time.time()
-        chunks = split_chunks(sub.content.replace("\n", " "))
-        translated = [traduzir_chunk(ch) for ch in chunks]
-        sub.content = "\n".join(translated)
-        elapsed_time = time.time() - start_time
-        total_time += elapsed_time
-        avg_time = total_time / (i + 1)
-        remaining_time = avg_time * (total - (i + 1))
-        progress(i / total, desc=f"Traduzindo {i + 1}/{total} - Estimativa: {format_time(remaining_time)}")
-    progress(1.0, desc="Concluído!")
+def unload_model(model_name):
+    base_model = model_name.split(":")[0]
+    url = f"{OLLAMA_HOST}/api/generate"
+    payload = {
+        "model": base_model,
+        "keep_alive": 0
+    }
+    try:
+        resp = requests.post(url, json=payload)
+        resp.raise_for_status()
+        print(f"Requested unload of model '{base_model}' successfully.")
+        time.sleep(2)  # Delay para garantir descarregamento
+    except Exception as e:
+        print(f"Error unloading model '{base_model}': {e}")
 
-    # Caminho para salvar o arquivo traduzido
-    output_dir = '/app/translate_output'
-    os.makedirs(output_dir, exist_ok=True)
+def translate_file(input_path: str, src_lang, tgt_lang, model, unload_after, progress=gr.Progress()):
+    filename = os.path.basename(input_path)
+    name, ext = os.path.splitext(filename)
 
-    out_path = os.path.join(output_dir, 'traduzido.srt')
-    with open(out_path, 'wb') as out_file:
-        out_file.write(srt.compose(subs).encode('utf-8'))
+    with open(input_path, 'r', encoding='utf-8') as f:
+        text = f.read()
+
+    if ext.lower() == '.srt':
+        subs = list(srt.parse(text))
+        total = len(subs)
+        total_time = 0
+        for i, sub in enumerate(subs):
+            start = time.time()
+            chunks = split_chunks(sub.content.replace("\n", " "))
+            translated = [translate_chunk(c, src_lang, tgt_lang, model) for c in chunks]
+            sub.content = "\n".join(translated)
+            elapsed = time.time() - start
+            total_time += elapsed
+            remaining = total_time/(i+1)*(total-(i+1))
+            progress(i/total, desc=f"Translating {i+1}/{total} – ETA {format_time(remaining)}")
+        content = srt.compose(subs)
+    else:
+        chunks = split_chunks(text)
+        total = len(chunks)
+        total_time = 0
+        translated_chunks = []
+        for i, ch in enumerate(chunks):
+            start = time.time()
+            translated_chunks.append(translate_chunk(ch, src_lang, tgt_lang, model))
+            elapsed = time.time() - start
+            total_time += elapsed
+            remaining = total_time/(i+1)*(total-(i+1))
+            progress(i/total, desc=f"Translating chunk {i+1}/{total} – ETA {format_time(remaining)}")
+        content = "\n".join(translated_chunks)
+
+    progress(1.0, desc="Done!")
+
+    out_dir = '/app/translate_output'
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, f"{name}_translated{ext}")
+    with open(out_path, 'w', encoding='utf-8') as f:
+        f.write(content)
+
+    # Se marcado, pede para Ollama descarregar o modelo
+    if unload_after:
+        unload_model(model)
 
     return out_path
 
-# Tradução dos botões
-i18n = gr.I18n(pt={"submit": "Enviar", "clear": "Limpar"})
-
-# CSS para contraste e fundo branco
+# Custom UI styling
 custom_css = """
-.gradio-container {
-  background-color: #f5f5f5;
-}
-.upload-box, .progress-box {
-  background-color: white;
-  padding: 10px;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-  margin-bottom: 10px;
-}
+.gradio-container { background-color: #f5f5f5; }
+.upload-box { background-color: white; padding:10px; border-radius:8px;
+  box-shadow:0 2px 4px rgba(0,0,0,0.1); margin-bottom:10px; }
 """
 
 with gr.Blocks(css=custom_css) as demo:
-    gr.Markdown("# Tradutor de legendas (.srt) – Pt‑BR")
+    gr.Markdown("# Subtitle/Text Translator")
 
+    models = get_models()
     with gr.Row():
-        with gr.Column(scale=1):
-            input_file = gr.File(label="Upload .srt ou texto", type="binary", elem_classes="upload-box")
+        with gr.Column():
+            src = gr.Dropdown(LANG_CHOICES, label="From language:", value="English")
+            tgt = gr.Dropdown(LANG_CHOICES, label="To language:", value="Portuguese (Brazilian)")
+            model_dd = gr.Dropdown(models, label="LLM model:", value=models[0] if models else "")
+            input_file = gr.File(label="Upload file (SRT or TXT)", type="filepath", elem_classes="upload-box")
+            unload_chk = gr.Checkbox(label="Unload model from VRAM after translation", value=False)
             with gr.Row():
-                translate_btn = gr.Button("Enviar", variant="primary")
-                clear_btn = gr.Button("Limpar", variant="secondary")
+                translate_btn = gr.Button("Translate", variant="primary")
+                clear_btn = gr.Button("Clear", variant="secondary")
+            output_file = gr.File(label="Download translated file")
 
-            output_file = gr.File(label="Baixar tradução (.srt)")
-
-    translate_btn.click(traduzir_srt, inputs=[input_file], outputs=[output_file], queue=True)
+    translate_btn.click(
+        translate_file,
+        inputs=[input_file, src, tgt, model_dd, unload_chk],
+        outputs=[output_file],
+        queue=True
+    )
     clear_btn.click(lambda: None, None, None)
 
-demo.launch(server_name="0.0.0.0", server_port=5001, i18n=i18n)
+demo.launch(server_name="0.0.0.0", server_port=5001)
