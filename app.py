@@ -46,7 +46,7 @@ iface = gr.Interface(
     fn=traduzir_srt,
     inputs=gr.File(label="Upload .srt (ou texto)", type="binary"),
     outputs=gr.File(label="Baixar tradução (.srt)"),
-    title="Tradutor de legendas (.srt) – Pt‑BR",
+    title="Tradutor de legendas (.srt)",
     description="Usa zongwei/gemma3-translator via Ollama",
     flagging_mode="never"
 )
