@@ -5,7 +5,7 @@ import os
 import requests
 from ollama import Client, ChatResponse
 
-# Configuração do Ollama
+# Ollama config
 OLLAMA_HOST = "http://localhost:11434"
 client = Client(host=OLLAMA_HOST)
 
@@ -58,7 +58,7 @@ def unload_model(model_name):
         resp = requests.post(url, json=payload)
         resp.raise_for_status()
         print(f"Requested unload of model '{base_model}' successfully.")
-        time.sleep(2)  # Delay para garantir descarregamento
+        time.sleep(2)
     except Exception as e:
         print(f"Error unloading model '{base_model}': {e}")
 
@@ -105,20 +105,12 @@ def translate_file(input_path: str, src_lang, tgt_lang, model, unload_after, pro
     with open(out_path, 'w', encoding='utf-8') as f:
         f.write(content)
 
-    # Se marcado, pede para Ollama descarregar o modelo
     if unload_after:
         unload_model(model)
 
     return out_path
 
-# Custom UI styling
-custom_css = """
-.gradio-container { background-color: #f5f5f5; }
-.upload-box { background-color: white; padding:10px; border-radius:8px;
-  box-shadow:0 2px 4px rgba(0,0,0,0.1); margin-bottom:10px; }
-"""
-
-with gr.Blocks(css=custom_css) as demo:
+with gr.Blocks(title="Translator") as demo:
     gr.Markdown("# Subtitle/Text Translator")
 
     models = get_models()
@@ -127,7 +119,7 @@ with gr.Blocks(css=custom_css) as demo:
             src = gr.Dropdown(LANG_CHOICES, label="From language:", value="English")
             tgt = gr.Dropdown(LANG_CHOICES, label="To language:", value="Portuguese (Brazilian)")
             model_dd = gr.Dropdown(models, label="LLM model:", value=models[0] if models else "")
-            input_file = gr.File(label="Upload file (SRT or TXT)", type="filepath", elem_classes="upload-box")
+            input_file = gr.File(label="Upload file (SRT or TXT)", type="filepath")
             unload_chk = gr.Checkbox(label="Unload model from VRAM after translation", value=False)
             with gr.Row():
                 translate_btn = gr.Button("Translate", variant="primary")
@@ -142,4 +134,7 @@ with gr.Blocks(css=custom_css) as demo:
     )
     clear_btn.click(lambda: None, None, None)
 
-demo.launch(server_name="0.0.0.0", server_port=5001)
+demo.launch(
+    server_name="0.0.0.0",
+    server_port=5001
+)
