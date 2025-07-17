@@ -2,6 +2,7 @@ import gradio as gr
 import srt
 import tempfile
 import time
+import os
 from ollama import Client, ChatResponse
 
 # Conexão com o Ollama
@@ -60,10 +61,15 @@ def traduzir_srt(file_bytes: bytes, progress=gr.Progress()):
         progress(i / total, desc=f"Traduzindo {i + 1}/{total} - Estimativa: {format_time(remaining_time)}")
     progress(1.0, desc="Concluído!")
 
-    out = tempfile.NamedTemporaryFile(suffix=".srt", delete=False)
-    out.write(srt.compose(subs).encode("utf-8"))
-    out.flush()
-    return out.name
+    # Caminho para salvar o arquivo traduzido
+    output_dir = '/app/translate_output'
+    os.makedirs(output_dir, exist_ok=True)
+
+    out_path = os.path.join(output_dir, 'traduzido.srt')
+    with open(out_path, 'wb') as out_file:
+        out_file.write(srt.compose(subs).encode('utf-8'))
+
+    return out_path
 
 # Tradução dos botões
 i18n = gr.I18n(pt={"submit": "Enviar", "clear": "Limpar"})
