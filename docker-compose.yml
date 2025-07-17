@@ -1,0 +1,11 @@
+version: "3.8"
+services:
+  translator:
+    build: .
+    ports:
+      - "5001:5001"
+    environment:
+      - GRADIO_SERVER_NAME=0.0.0.0
+      - GRADIO_SERVER_PORT=5001
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
