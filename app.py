@@ -1,9 +1,11 @@
 import gradio as gr
-import srt, tempfile
+import srt
+import tempfile
+import time
 from ollama import Client, ChatResponse
 
-# Configuração do Ollama
-client = Client(host="http://host.docker.internal:11434")
+# Conexão com o Ollama
+client = Client(host="http://localhost:11434")
 
 MAX_CHARS = 1000
 SRC_LANG = "English"
@@ -30,26 +32,69 @@ def traduzir_chunk(chunk):
     )
     return resp.message.content.strip()
 
-def traduzir_srt(file_bytes: bytes):
+def format_time(seconds):
+    """Converte segundos em formato legível (s, m, h)."""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    elif seconds < 3600:
+        minutes = seconds / 60
+        return f"{minutes:.1f}m"
+    else:
+        hours = seconds / 3600
+        return f"{hours:.1f}h"
+
+def traduzir_srt(file_bytes: bytes, progress=gr.Progress()):
     text = file_bytes.decode("utf-8")
     subs = list(srt.parse(text))
-    for sub in subs:
+    total = len(subs)
+    total_time = 0  # Tempo total gasto
+    for i, sub in enumerate(subs):
+        start_time = time.time()
         chunks = split_chunks(sub.content.replace("\n", " "))
         translated = [traduzir_chunk(ch) for ch in chunks]
         sub.content = "\n".join(translated)
+        elapsed_time = time.time() - start_time
+        total_time += elapsed_time
+        avg_time = total_time / (i + 1)
+        remaining_time = avg_time * (total - (i + 1))
+        progress(i / total, desc=f"Traduzindo {i + 1}/{total} - Estimativa: {format_time(remaining_time)}")
+    progress(1.0, desc="Concluído!")
+
     out = tempfile.NamedTemporaryFile(suffix=".srt", delete=False)
     out.write(srt.compose(subs).encode("utf-8"))
     out.flush()
     return out.name
 
-iface = gr.Interface(
-    fn=traduzir_srt,
-    inputs=gr.File(label="Upload .srt (ou texto)", type="binary"),
-    outputs=gr.File(label="Baixar tradução (.srt)"),
-    title="Tradutor de legendas (.srt)",
-    description="Usa zongwei/gemma3-translator via Ollama",
-    flagging_mode="never"
-)
+# Tradução dos botões
+i18n = gr.I18n(pt={"submit": "Enviar", "clear": "Limpar"})
 
-if __name__ == "__main__":
-    iface.launch(server_name="0.0.0.0", server_port=5001)
+# CSS para contraste e fundo branco
+custom_css = """
+.gradio-container {
+  background-color: #f5f5f5;
+}
+.upload-box, .progress-box {
+  background-color: white;
+  padding: 10px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  margin-bottom: 10px;
+}
+"""
+
+with gr.Blocks(css=custom_css) as demo:
+    gr.Markdown("# Tradutor de legendas (.srt) – Pt‑BR")
+
+    with gr.Row():
+        with gr.Column(scale=1):
+            input_file = gr.File(label="Upload .srt ou texto", type="binary", elem_classes="upload-box")
+            with gr.Row():
+                translate_btn = gr.Button("Enviar", variant="primary")
+                clear_btn = gr.Button("Limpar", variant="secondary")
+
+            output_file = gr.File(label="Baixar tradução (.srt)")
+
+    translate_btn.click(traduzir_srt, inputs=[input_file], outputs=[output_file], queue=True)
+    clear_btn.click(lambda: None, None, None)
+
+demo.launch(server_name="0.0.0.0", server_port=5001, i18n=i18n)
