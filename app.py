@@ -30,8 +30,8 @@ def split_chunks(text, max_chars=MAX_CHARS):
         start = end
     return chunks
 
-def translate_chunk(chunk, src_lang, tgt_lang, model):
-    prompt = f"Translate from {src_lang} to {tgt_lang}: {chunk}"
+def translate_chunk(chunk, src_lang, tgt_lang, model, movie_context):
+    prompt = f"Translate from {src_lang} to {tgt_lang} keeping the {movie_context} context such as character's names and places' names: {chunk}"
     resp: ChatResponse = client.chat(
         model=model,
         messages=[{"role": "user", "content": prompt}],
@@ -62,7 +62,7 @@ def unload_model(model_name):
     except Exception as e:
         print(f"Error unloading model '{base_model}': {e}")
 
-def translate_file(input_path: str, src_lang, tgt_lang, model, unload_after, progress=gr.Progress()):
+def translate_file(input_path: str, src_lang, tgt_lang, model, unload_after, movie_context, progress=gr.Progress()):
     filename = os.path.basename(input_path)
     name, ext = os.path.splitext(filename)
 
@@ -76,7 +76,7 @@ def translate_file(input_path: str, src_lang, tgt_lang, model, unload_after, pro
         for i, sub in enumerate(subs):
             start = time.time()
             chunks = split_chunks(sub.content.replace("\n", " "))
-            translated = [translate_chunk(c, src_lang, tgt_lang, model) for c in chunks]
+            translated = [translate_chunk(c, src_lang, tgt_lang, model, movie_context) for c in chunks]
             sub.content = "\n".join(translated)
             elapsed = time.time() - start
             total_time += elapsed
@@ -90,7 +90,7 @@ def translate_file(input_path: str, src_lang, tgt_lang, model, unload_after, pro
         translated_chunks = []
         for i, ch in enumerate(chunks):
             start = time.time()
-            translated_chunks.append(translate_chunk(ch, src_lang, tgt_lang, model))
+            translated_chunks.append(translate_chunk(ch, src_lang, tgt_lang, model, movie_context))
             elapsed = time.time() - start
             total_time += elapsed
             remaining = total_time/(i+1)*(total-(i+1))
@@ -119,6 +119,7 @@ with gr.Blocks(title="Translator") as demo:
             src = gr.Dropdown(LANG_CHOICES, label="From language:", value="English")
             tgt = gr.Dropdown(LANG_CHOICES, label="To language:", value="Portuguese (Brazilian)")
             model_dd = gr.Dropdown(models, label="LLM model:", value=models[0] if models else "")
+            movie_name = gr.Textbox(label="Movie/Series Name (for context)", placeholder="e.g. The Matrix")
             input_file = gr.File(label="Upload file (SRT or TXT)", type="filepath")
             unload_chk = gr.Checkbox(label="Unload model from VRAM after translation", value=False)
             with gr.Row():
@@ -128,7 +129,7 @@ with gr.Blocks(title="Translator") as demo:
 
     translate_btn.click(
         translate_file,
-        inputs=[input_file, src, tgt, model_dd, unload_chk],
+        inputs=[input_file, src, tgt, model_dd, unload_chk, movie_name],
         outputs=[output_file],
         queue=True
     )
